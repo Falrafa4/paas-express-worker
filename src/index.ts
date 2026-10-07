@@ -18,12 +18,20 @@ app.get('/api/status', (req, res) => {
 	});
 });
 
-app.get("/api/info", (req, res) => {
-  res.json({
-    framework: "Express",
-    runtime: "Cloudflare Workers",
-    course: "Platform as a Service"
-  });
+app.get('/api/info', (req, res) => {
+	res.json({
+		framework: 'Express',
+		runtime: 'Cloudflare Workers',
+		course: 'Platform as a Service',
+	});
+});
+
+app.get('/api/log-test', (req, res) => {
+	console.log('Endpoint /api/log-test dipanggil');
+
+	res.json({
+		logged: true,
+	});
 });
 
 app.listen(3000);
