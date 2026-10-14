@@ -1,112 +1,109 @@
+import { env } from 'cloudflare:workers';
 import { httpServerHandler } from 'cloudflare:node';
 import express from 'express';
 
 const app = express();
+app.use(express.json());
 
-app.get('/', (req, res) => {
+function validId(raw: string) {
+	const id = Number(raw);
+	return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function fields(body: any) {
+	return {
+		name: typeof body?.name === 'string' ? body.name.trim() : '',
+		class_name: typeof body?.class_name === 'string' ? body.class_name.trim() : '',
+	};
+}
+
+app.get('/', (_req, res) => {
 	res.json({
-		message: 'Hello Express on Cloudflare Worker',
+		message: 'Express + D1 CRUD API',
 	});
 });
 
-app.get('/api/status', (req, res) => {
-	res.json({
-		status: 'ok',
-		subject: 'PaaS',
-		week: 5,
-		platform: 'Cloudflare Workers',
-	});
+// READ ALL
+app.get('/api/students', async (_req, res) => {
+	try {
+		const { results } = await env.DB.prepare('SELECT id, name, class_name FROM students ORDER BY id DESC').all();
+		res.json({ data: results });
+	} catch (error) {
+		console.error('READ ALL failed', error);
+		res.status(500).json({ error: 'Database error' });
+	}
 });
 
-app.get('/api/info', (req, res) => {
-	res.json({
-		framework: 'Express',
-		runtime: 'Cloudflare Workers',
-		course: 'Platform as a Service',
-	});
+// READ ONE
+app.get('/api/students/:id', async (req, res) => {
+	const id = validId(req.params.id);
+	if (!id) {
+		return res.status(400).json({ error: 'Invalid ID' });
+	}
+	try {
+		const student = await env.DB.prepare('SELECT id, name, class_name FROM students WHERE id = ?').bind(id).first();
+		if (!student) {
+			return res.status(404).json({ error: 'Student not found' });
+		}
+		res.json({ data: student });
+	} catch (error) {
+		console.error('READ ONE failed', error);
+		res.status(500).json({ error: 'Database error' });
+	}
 });
 
-app.get('/api/log-test', (req, res) => {
-	console.log('Endpoint /api/log-test dipanggil');
-
-	res.json({
-		logged: true,
-	});
+// CREATE
+app.post('/api/students', async (req, res) => {
+	const { name, class_name } = fields(req.body);
+	if (!name || !class_name) {
+		return res.status(400).json({ error: 'Name and class_name are required' });
+	}
+	try {
+		const result = await env.DB.prepare('INSERT INTO students (name, class_name) VALUES (?, ?)').bind(name, class_name).run();
+		res.status(201).json({ id: result.meta.last_row_id, name, class_name });
+	} catch (error) {
+		console.error('CREATE failed', error);
+		res.status(500).json({ error: 'Database error' });
+	}
 });
 
-app.get('/api/time', (req, res) => {
-	const now = new Date();
-	
-	const formatter = new Intl.DateTimeFormat('id-ID', {
-		timeZone: 'Asia/Jakarta',
-		dateStyle: 'full',
-		timeStyle: 'medium'
-	})
+// UPDATE
+app.put('/api/students/:id', async (req, res) => {
+	const id = validId(req.params.id);
+	const { name, class_name } = fields(req.body);
+	if (!id || !name || !class_name) {
+		return res.status(400).json({ error: 'Valid ID, name, and class_name are required' });
+	}
+	try {
+		const result = await env.DB.prepare('UPDATE students SET name = ?, class_name = ? WHERE id = ?').bind(name, class_name, id).run();
+		if (result.meta.changes === 0) {
+			return res.status(404).json({ error: 'Not found' });
+		}
+		res.json({ id, name, class_name, updated: true });
+	} catch (error) {
+		console.error('UPDATE failed', error);
+		res.status(500).json({ error: 'Database error' });
+	}
+});
 
-	const timeFormatter = new Intl.DateTimeFormat('id-ID', {
-		timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-	})
-
-	res.json({
-		formatted: formatter.format(now),
-		timeOnly: timeFormatter.format(now),
-		timestamp: now.toISOString()
-	})
-})
-
-app.get('/hello/:name', (req, res) => {
-	const name = req.params.name;
-
-	res.json({
-		success: true,
-		message: `Hello, ${name}. Welcome to Express!`
-	})
-})
-
-app.get('/home', (req, res) => {
-	res.send(`
-		<!doctype html>
-		<html lang="id">
-			<head>
-				<meta charset="UTF-8" />
-				<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-				<title>PaaS Express Deployment</title>
-				<style>
-					* {
-						font-family: 'Arial';
-						padding: 0;
-						margin: 0;
-						box-sizing: border-box;
-					}
-		
-					body {
-						background-color: #fafafa;
-						display: flex;
-						flex-direction: column;
-						padding-top: 4rem;
-						height: 100dvh;
-						text-align: center;
-					}
-		
-					main p {
-						margin: 1rem 0;
-					}
-				</style>
-			</head>
-			<body>
-				<main>
-					<h1>Hello, Express!</h1>
-					<p>Website ini dideploy dari GitHub ke Cloudflare Workers.</p>
-				</main>
-			</body>
-		</html>
-		`)
-})
+app.delete('/api/students/:id', async (req, res) => {
+	const id = validId(req.params.id);
+	if (!id) {
+		res.status(400).json({ error: 'Invalid ID' });
+		return;
+	}
+	try {
+		const result = await env.DB.prepare('DELETE FROM students WHERE id = ?').bind(id).run();
+		if (result.meta.changes === 0) {
+			res.status(404).json({ error: 'Not found' });
+			return;
+		}
+		res.json({ id, deleted: true });
+	} catch (error) {
+		console.error('DELETE failed', error);
+		res.status(500).json({ error: 'Database error' });
+	}
+});
 
 app.listen(3000);
-
 export default httpServerHandler({ port: 3000 });
